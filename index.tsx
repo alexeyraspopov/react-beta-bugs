@@ -1,4 +1,12 @@
-import { use, useSyncExternalStore, useTransition, Suspense, useState, useMemo } from "react";
+import {
+  use,
+  useSyncExternalStore,
+  useTransition,
+  Suspense,
+  useState,
+  useMemo,
+  useEffect,
+} from "react";
 import { createRoot } from "react-dom/client";
 
 createRoot(document.querySelector("main")!).render(<App />);
@@ -27,6 +35,12 @@ function App() {
         value without extra "Loading" state.
       </p>
       <StoreBasedFlow />
+      <hr />
+      <p>
+        The same flow as above, but this time useSyncExternalStore() is implemented naively using
+        useState() and useEffect().
+      </p>
+      <StoreBasedFlowShim />
     </section>
   );
 }
@@ -88,6 +102,41 @@ function ExternallyControlledDisplay({ atom }: { atom: Atom<Promise<number>> }) 
   );
 }
 
+function StoreBasedFlowShim() {
+  let atom = useMemo(() => createAtom(delayed(Math.random())), []);
+  return (
+    <Suspense fallback={<p>Loading</p>}>
+      <ExternallyControlledDisplayShim atom={atom} />
+    </Suspense>
+  );
+}
+
+function ExternallyControlledDisplayShim({ atom }: { atom: Atom<Promise<number>> }) {
+  let promise = useSyncExternalStoreShim(atom.subscribe, atom.get);
+  let value = use(promise);
+  let [pending, startTransition] = useTransition();
+  let click = () => {
+    startTransition(() => {
+      atom.set(delayed(Math.random()));
+    });
+  };
+  return (
+    <div>
+      <button onClick={click}>Refresh</button>
+      <p style={{ opacity: pending ? 0.5 : 1 }}>{value}</p>
+    </div>
+  );
+}
+
+function useSyncExternalStoreShim<T>(
+  subscribe: (cb: () => void) => () => void,
+  getSnapshot: () => T,
+): T {
+  let [snapshot, setSnapshot] = useState(getSnapshot);
+  useEffect(() => subscribe(() => setSnapshot(getSnapshot)), [subscribe, getSnapshot]);
+  return snapshot;
+}
+
 function delayed<T>(value: T) {
   return new Promise<T>((resolve) => setTimeout(resolve, 1000, value));
 }
@@ -103,7 +152,7 @@ function createAtom<T>(value: T, events = new EventTarget()) {
       value = newValue;
       events.dispatchEvent(new Event("change"));
     },
-    subscribe(cb) {
+    subscribe(cb: () => void) {
       events.addEventListener("change", cb);
       return () => events.removeEventListener("change", cb);
     },
